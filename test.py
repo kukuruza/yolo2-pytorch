@@ -10,7 +10,6 @@ from darknet import Darknet19
 import utils.yolo as yolo_utils
 import utils.network as net_utils
 from utils.timer import Timer
-from datasets.factory import define_dataset
 from torch.utils.data import DataLoader
 import cfgs.config as cfg
 
@@ -19,6 +18,8 @@ logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
 
 
 parser = argparse.ArgumentParser(description='PyTorch Yolo')
+parser.add_argument('--dataset_type', default='citycam', choices=['pascal_voc', 'citycam'])
+parser.add_argument('--db_path', help='for citycam dataset only')
 parser.add_argument('--image_size_index', type=int, default=0,
                     metavar='image_size_index',
                     help='setting images size index 0:320, 1:352, 2:384, 3:416, 4:448, 5:480, 6:512, 7:544, 8:576')
@@ -27,7 +28,6 @@ args = parser.parse_args()
 
 # hyper-parameters
 # ------------
-imdb_name = cfg.imdb_test
 # trained_model = cfg.trained_model
 trained_model = os.path.join(cfg.train_output_dir,
                              'darknet19_voc07trainval_exp3_118.h5')
@@ -128,9 +128,22 @@ def test_net(net, dataset, dataloader, max_per_image=300, thresh=0.5, vis=False)
     dataset.evaluate_detections(all_boxes, output_dir)
 
 
+def define_dataset(dataset_type):
+    if dataset_type == 'pascal_voc':
+        from datasets.pascal_voc import VOCDataset
+        return VOCDataset(cfg.imdb_test, cfg.DATA_DIR)
+    elif dataset_type == 'citycam':
+        import os, sys
+        sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
+        from db.lib.dbDataset import CityimagesDataset
+        return CityimagesDataset(args.db_path)
+    else:
+        raise Exception('Wrong dataset_type.')
+
+
 if __name__ == '__main__':
     # data loader
-    dataset = define_dataset('pascal_voc', imdb_name, cfg.DATA_DIR)
+    dataset = define_dataset('pascal_voc')
     collate_fn = partial(yolo_utils.collate_fn_test,
         inp_size=cfg.multi_scale_inp_size[args.image_size_index])
     dataloader = DataLoader(dataset, batch_size=cfg.batch_size,

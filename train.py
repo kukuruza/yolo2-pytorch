@@ -2,35 +2,49 @@ import os
 import torch
 import datetime
 import logging
+import argparse
 from functools import partial
-
-from darknet import Darknet19
-
-from datasets.factory import define_dataset
 from torch.utils.data import DataLoader
+from darknet import Darknet19
 import utils.yolo as yolo_utils
 import utils.network as net_utils
 from utils.timer import Timer
 import cfgs.config as cfg
 from random import randint
+from torch.utils.data import DataLoader
+from torch.autograd import Variable
 
 try:
     from pycrayon import CrayonClient
 except ImportError:
     CrayonClient = None
 
-
 logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
 
+parser = argparse.ArgumentParser(description='PyTorch Yolo')
+parser.add_argument('--dataset_type', default='citycam', choices=['pascal_voc', 'citycam'])
+parser.add_argument('--db_path', help='for citycam dataset only')
+args = parser.parse_args()
+
+
+def define_dataset(dataset_type):
+    if dataset_type == 'pascal_voc':
+        from datasets.pascal_voc import VOCDataset
+        return VOCDataset(cfg.imdb_train, cfg.DATA_DIR)
+    elif dataset_type == 'citycam':
+        import os, sys
+        sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
+        from db.lib.dbDataset import CityimagesDataset
+        return CityimagesDataset(args.db_path)
+    else:
+        raise Exception('Wrong dataset_type.')
 
 # data loader
-
-dataset = define_dataset('pascal_voc', cfg.imdb_train, cfg.DATA_DIR)
+dataset = define_dataset(args.dataset_type)
 collate_fn = partial(yolo_utils.collate_fn_train,
     multi_scale_inp_size=cfg.multi_scale_inp_size)
 dataloader = DataLoader(dataset, batch_size=cfg.train_batch_size,
     shuffle=True, num_workers=2, collate_fn=collate_fn)
-# dst_size=cfg.inp_size)
 print('load data succ...')
 
 net = Darknet19()
@@ -80,6 +94,7 @@ for epoch in range(start_epoch, cfg.max_epoch):
     step += 1
 
     t.tic()
+
     im = batch['images']
     gt_boxes = batch['gt_boxes']
     gt_classes = batch['gt_classes']
@@ -87,7 +102,6 @@ for epoch in range(start_epoch, cfg.max_epoch):
     orgin_im = batch['origin_im']
     size_index = batch['size_index']
 
-    # forward
     im_data = net_utils.np_to_variable(im,
                                        is_cuda=True,
                                        volatile=False).permute(0, 3, 1, 2)

@@ -58,10 +58,12 @@ colors = [_to_color(x, base) for x in range(num_classes)]
 ############################
 thresh = 0.3
 
+batch_per_epoch = 1000
 
 # dir config
 ############################
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+#DATA_DIR = 'data/faster-rcnn/572-Feb23-09h/jan29-real/labelled-filt-train-e02-w25.db'
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
 MODEL_DIR = os.path.join(ROOT_DIR, 'models')
 TRAIN_DIR = os.path.join(MODEL_DIR, 'training')
