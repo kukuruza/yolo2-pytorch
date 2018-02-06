@@ -3,20 +3,19 @@ import cv2
 import numpy as np
 import pickle
 import argparse
+import logging
+from functools import partial
 
 from darknet import Darknet19
 import utils.yolo as yolo_utils
 import utils.network as net_utils
 from utils.timer import Timer
 from datasets.pascal_voc import VOCDataset
+from torch.utils.data import DataLoader
 import cfgs.config as cfg
 
 
-def preprocess(fname):
-    # return fname
-    image = cv2.imread(fname)
-    im_data = np.expand_dims(yolo_utils.preprocess_test(image, cfg.inp_size), 0)  # noqa
-    return image, im_data
+logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
 
 
 parser = argparse.ArgumentParser(description='PyTorch Yolo')
@@ -40,23 +39,22 @@ vis = False
 # ------------
 
 
-def test_net(net, imdb, max_per_image=300, thresh=0.5, vis=False):
-    num_images = imdb.num_images
+def test_net(net, dataset, dataloader, max_per_image=300, thresh=0.5, vis=False):
+    num_images = len(dataset)
+    num_classes = dataset.num_classes
 
     # all detections are collected into:
     #    all_boxes[cls][image] = N x 5 array of detections in
     #    (x1, y1, x2, y2, score)
     all_boxes = [[[] for _ in range(num_images)]
-                 for _ in range(imdb.num_classes)]
+                 for _ in range(num_classes)]
 
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
     det_file = os.path.join(output_dir, 'detections.pkl')
-    size_index = args.image_size_index
 
-    for i in range(num_images):
+    for i, batch in enumerate(dataloader):
 
-        batch = imdb.next_batch(size_index=size_index)
         ori_im = batch['origin_im'][0]
         im_data = net_utils.np_to_variable(batch['images'], is_cuda=True,
                                            volatile=True).permute(0, 3, 1, 2)
@@ -75,13 +73,13 @@ def test_net(net, imdb, max_per_image=300, thresh=0.5, vis=False):
                                                           ori_im.shape,
                                                           cfg,
                                                           thresh,
-                                                          size_index
+                                                          args.image_size_index
                                                           )
         detect_time = _t['im_detect'].toc()
 
         _t['misc'].tic()
 
-        for j in range(imdb.num_classes):
+        for j in range(num_classes):
             inds = np.where(cls_inds == j)[0]
             if len(inds) == 0:
                 all_boxes[j][i] = np.empty([0, 5], dtype=np.float32)
@@ -96,10 +94,10 @@ def test_net(net, imdb, max_per_image=300, thresh=0.5, vis=False):
         # Limit to max_per_image detections *over all classes*
         if max_per_image > 0:
             image_scores = np.hstack([all_boxes[j][i][:, -1]
-                                      for j in range(imdb.num_classes)])
+                                      for j in range(num_classes)])
             if len(image_scores) > max_per_image:
                 image_thresh = np.sort(image_scores)[-max_per_image]
-                for j in range(1, imdb.num_classes):
+                for j in range(1, num_classes):
                     keep = np.where(all_boxes[j][i][:, -1] >= image_thresh)[0]
                     all_boxes[j][i] = all_boxes[j][i][keep, :]
         nms_time = _t['misc'].toc()
@@ -115,10 +113,11 @@ def test_net(net, imdb, max_per_image=300, thresh=0.5, vis=False):
                                                 scores,
                                                 cls_inds,
                                                 cfg,
-                                                thr=0.1)
+                                                thr=0.0)
             if im2show.shape[0] > 1100:
                 im2show = cv2.resize(im2show,
                                      (int(1000. * float(im2show.shape[1]) / im2show.shape[0]), 1000))  # noqa
+            #cv2.imwrite('results/im%02d.jpg' % i, im2show)
             cv2.imshow('test', im2show)
             cv2.waitKey(0)
 
@@ -126,14 +125,16 @@ def test_net(net, imdb, max_per_image=300, thresh=0.5, vis=False):
         pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 
     print('Evaluating detections')
-    imdb.evaluate_detections(all_boxes, output_dir)
+    dataset.evaluate_detections(all_boxes, output_dir)
 
 
 if __name__ == '__main__':
     # data loader
-    imdb = VOCDataset(imdb_name, cfg.DATA_DIR, cfg.batch_size,
-                      yolo_utils.preprocess_test,
-                      processes=2, shuffle=False, dst_size=cfg.multi_scale_inp_size)
+    dataset = VOCDataset(imdb_name, cfg.DATA_DIR)
+    collate_fn = partial(yolo_utils.collate_fn_test,
+        inp_size=cfg.multi_scale_inp_size[args.image_size_index])
+    dataloader = DataLoader(dataset, batch_size=cfg.batch_size,
+        shuffle=False, num_workers=2, drop_last=False, collate_fn=collate_fn)
 
     net = Darknet19()
     net_utils.load_net(trained_model, net)
@@ -141,6 +142,5 @@ if __name__ == '__main__':
     net.cuda()
     net.eval()
 
-    test_net(net, imdb, max_per_image, thresh, vis)
+    test_net(net, dataset, dataloader, max_per_image, thresh, vis)
 
-    imdb.close()

@@ -36,8 +36,7 @@ multi_scale_out_size = [multi_scale_inp_size[0] / 32,
                         multi_scale_inp_size[8] / 32,
                         # multi_scale_inp_size[9] / 32,
                         ]   # w, h
-inp_size = np.array([416, 416], dtype=np.int)   # w, h
-out_size = inp_size / 32
+demo_index = 3
 
 
 # for display

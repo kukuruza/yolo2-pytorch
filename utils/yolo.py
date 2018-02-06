@@ -1,9 +1,12 @@
 import cv2
 import numpy as np
+import logging
+from random import randint
 from .im_transform import imcv2_affine_trans, imcv2_recolor
 # from box import BoundBox, box_iou, prob_compare
 from utils.nms_wrapper import nms
 from utils.cython_yolo import yolo_to_bbox
+from functools import partial
 
 
 def clip_boxes(boxes, im_shape):
@@ -48,51 +51,84 @@ def _offset_boxes(boxes, im_shape, scale, offs, flip):
     return boxes
 
 
-def preprocess_train(data, size_index):
-    im_path, blob, inp_size = data
-    inp_size = inp_size[size_index]
-    boxes, gt_classes = blob['boxes'], blob['gt_classes']
+def collate_fn_train(batch, multi_scale_inp_size):
+    '''
+    Collects a list of (image, gt boxes, etc) from a dataset into a batch.
+    Used by torch.utils.data.DataLoader to collect samples.
+    All images and boxes in a batch are resized to a randomly picked size index.
+    '''
+    # Pick size index.
+    size_index = randint(0, len(multi_scale_inp_size) - 1)
+    inp_size = multi_scale_inp_size[size_index]
+    logging.debug("size_index %s, image_size %s" % (size_index, inp_size))
 
-    im = cv2.imread(im_path)
-    ori_im = np.copy(im)
+    # Scale each image and its corresponding boxes in a batch.
+    for sample in batch:
+        im = sample['image']
 
-    im, trans_param = imcv2_affine_trans(im)
-    scale, offs, flip = trans_param
-    boxes = _offset_boxes(boxes, im.shape, scale, offs, flip)
+        # Save a copy as "original_image"
+        sample['origin_im'] = np.copy(im)
+        
+        im, trans_param = imcv2_affine_trans(im)
+        scale, offs, flip = trans_param
+        sample['gt_boxes'] = _offset_boxes(sample['gt_boxes'], im.shape, scale, offs, flip)
 
-    if inp_size is not None:
         w, h = inp_size
-        boxes[:, 0::2] *= float(w) / im.shape[1]
-        boxes[:, 1::2] *= float(h) / im.shape[0]
+        sample['gt_boxes'][:, 0::2] *= float(w) / im.shape[1]
+        sample['gt_boxes'][:, 1::2] *= float(h) / im.shape[0]
         im = cv2.resize(im, (w, h))
-    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-    im = imcv2_recolor(im)
-    # im /= 255.
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        im = imcv2_recolor(im)
+        sample['image'] = im
+        # im /= 255.  # Done in im_transform.imcv2_recolor.
 
-    # im = imcv2_recolor(im)
-    # h, w = inp_size
-    # im = cv2.resize(im, (w, h))
-    # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-    # im /= 255
-    boxes = np.asarray(boxes, dtype=np.int)
-    return im, boxes, gt_classes, [], ori_im
+        # im = imcv2_recolor(im)
+        # h, w = inp_size
+        # im = cv2.resize(im, (w, h))
+        # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        # im /= 255
+
+    # List of dicts to dict of lists.
+    batch = dict(zip(batch[0],zip(*[d.values() for d in batch])))
+    # Add size_index info.
+    batch['size_index'] = size_index
+    # 'image' is going to be stacked for the batch, the rest stay in lists.
+    batch['image'] = np.stack(batch['image'])
+    # Follow the notation from train.py.
+    batch['images'] = batch['image']
+    del batch['image']
+    return batch
 
 
-def preprocess_test(data, size_index):
+def collate_fn_test(batch, inp_size):
+    '''
+    Collects a list of (image, etc) from a dataset into a batch.
+    Used by torch.utils.data.DataLoader to collect samples.
+    All images and boxes in a batch are resized to a supplied inp_size.
+    '''
 
-    im, _, inp_size = data
-    inp_size = inp_size[size_index]
-    if isinstance(im, str):
-        im = cv2.imread(im)
-    ori_im = np.copy(im)
+    # Scale each image in a batch.
+    for sample in batch:
+        im = sample['image']
 
-    if inp_size is not None:
-        w, h = inp_size
-        im = cv2.resize(im, (w, h))
-    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-    im = im / 255.
+        # Save a copy as "original_image"
+        sample['origin_im'] = np.copy(im)
 
-    return im, [], [], [], ori_im
+        if inp_size is not None:
+            w, h = inp_size
+            im = cv2.resize(im, (w, h))
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        im = im / 255.
+        sample['image'] = im
+
+    # List of dicts to dict of lists.
+    batch = dict(zip(batch[0],zip(*[d.values() for d in batch])))
+    # 'image' is going to be stacked for the batch, the rest stay in lists.
+    batch['image'] = np.stack(batch['image'])
+    # Follow the notation from train.py.
+    batch['images'] = batch['image']
+    del batch['image']
+    return batch
 
 
 def postprocess(bbox_pred, iou_pred, prob_pred, im_shape, cfg, thresh=0.05,
@@ -109,6 +145,9 @@ def postprocess(bbox_pred, iou_pred, prob_pred, im_shape, cfg, thresh=0.05,
     anchors = cfg.anchors
     W, H = cfg.multi_scale_out_size[size_index]
     assert bbox_pred.shape[0] == 1, 'postprocess only support one image per batch'  # noqa
+    assert bbox_pred.shape[1] == H * W, (bbox_pred.shape, H, W)
+    assert bbox_pred.shape[2] == len(anchors), (bbox_pred, len(anchors))
+    assert bbox_pred.shape[3] == 4, bbox_pred.shape
 
     bbox_pred = yolo_to_bbox(
         np.ascontiguousarray(bbox_pred, dtype=np.float),

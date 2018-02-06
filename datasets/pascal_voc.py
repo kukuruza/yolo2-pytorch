@@ -2,23 +2,31 @@ import pickle
 import os
 import uuid
 import xml.etree.ElementTree as ET
+import logging
 
 import numpy as np
 import scipy.sparse
+import cv2
+from torch.utils.data import Dataset
 
-# from functools import partial
-
-from .imdb import ImageDataset
 from .voc_eval import voc_eval
-# from utils.yolo import preprocess_train
 
 
-class VOCDataset(ImageDataset):
-    def __init__(self, imdb_name, datadir, batch_size, im_processor,
-                 processes=3, shuffle=True, dst_size=None):
-        super(VOCDataset, self).__init__(imdb_name, datadir, batch_size,
-                                         im_processor, processes,
-                                         shuffle, dst_size)
+class VOCDataset(Dataset):
+    def __init__(self, imdb_name, datadir):
+        self._name = imdb_name
+        self._data_dir = datadir
+
+        self._num_classes = 0
+        self._classes = []
+
+        # load by self.load_dataset()
+        self._image_indexes = []
+        self._image_names = []
+        self._annotations = []
+        # Use this dict for storing dataset specific config options
+        self.config = {}
+
         meta = imdb_name.split('_')
         self._year = meta[1]
         self._image_set = meta[2]
@@ -48,9 +56,20 @@ class VOCDataset(ImageDataset):
                        'use_salt': True}
 
         self.load_dataset()
-        # self.im_processor = partial(process_im,
-        #     image_names=self._image_names, annotations=self._annotations)
-        # self.im_processor = preprocess_train
+
+    def __getitem__(self, index):
+        im_path = self.image_names[index]
+        im = cv2.imread(im_path)
+        annotation = self.get_annotation(index)
+        logging.debug(annotation)
+        return {'image': im, 
+                'gt_boxes': annotation['boxes'], 
+                'gt_classes': annotation['gt_classes'],
+                'dontcare': [],
+               }
+
+    def __len__(self):
+        return len(self.image_names)
 
     def load_dataset(self):
         # set self._image_index and self._annotations
@@ -205,6 +224,47 @@ class VOCDataset(ImageDataset):
                                 format(index, dets[k, -1],
                                        dets[k, 0] + 1, dets[k, 1] + 1,
                                        dets[k, 2] + 1, dets[k, 3] + 1))
+
+    def get_annotation(self, i):
+        if self.annotations is None:
+            return None
+        return self.annotations[i]
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def num_classes(self):
+        return len(self._classes)
+
+    @property
+    def classes(self):
+        return self._classes
+
+    @property
+    def image_names(self):
+        return self._image_names
+
+    @property
+    def image_indexes(self):
+        return self._image_indexes
+
+    @property
+    def annotations(self):
+        return self._annotations
+
+    @property
+    def cache_path(self):
+        cache_path = os.path.join(self._data_dir, 'cache')
+        def mkdir(path, max_depth=3):
+            parent, child = os.path.split(path)
+            if not os.path.exists(parent) and max_depth > 1:
+                mkdir(parent, max_depth-1)
+            if not os.path.exists(path):
+                os.mkdir(path)
+        mkdir(cache_path)
+        return cache_path
 
     def _do_python_eval(self, output_dir='output'):
         annopath = os.path.join(

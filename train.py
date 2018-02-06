@@ -1,10 +1,13 @@
 import os
 import torch
 import datetime
+import logging
+from functools import partial
 
 from darknet import Darknet19
 
 from datasets.pascal_voc import VOCDataset
+from torch.utils.data import DataLoader
 import utils.yolo as yolo_utils
 import utils.network as net_utils
 from utils.timer import Timer
@@ -17,10 +20,15 @@ except ImportError:
     CrayonClient = None
 
 
+logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
+
+
 # data loader
-imdb = VOCDataset(cfg.imdb_train, cfg.DATA_DIR, cfg.train_batch_size,
-                  yolo_utils.preprocess_train, processes=2, shuffle=True,
-                  dst_size=cfg.multi_scale_inp_size)
+dataset = VOCDataset(cfg.imdb_train, cfg.DATA_DIR)
+collate_fn = partial(yolo_utils.collate_fn_train,
+    multi_scale_inp_size=cfg.multi_scale_inp_size)
+dataloader = DataLoader(dataset, batch_size=cfg.train_batch_size,
+    shuffle=True, num_workers=2, collate_fn=collate_fn)
 # dst_size=cfg.inp_size)
 print('load data succ...')
 
@@ -59,23 +67,24 @@ if use_tensorboard:
     else:
         exp = cc.open_experiment(cfg.exp_name)
 
-batch_per_epoch = imdb.batch_per_epoch
+batch_per_epoch = len(dataset) // cfg.train_batch_size
 train_loss = 0
 bbox_loss, iou_loss, cls_loss = 0., 0., 0.
 cnt = 0
 t = Timer()
 step_cnt = 0
-size_index = 0
-for step in range(start_epoch * imdb.batch_per_epoch,
-                  cfg.max_epoch * imdb.batch_per_epoch):
+step = 0  # Step is NOT reset at each epoch.
+for epoch in range(start_epoch, cfg.max_epoch):
+  for batch in dataloader:
+    step += 1
+
     t.tic()
-    # batch
-    batch = imdb.next_batch(size_index)
     im = batch['images']
     gt_boxes = batch['gt_boxes']
     gt_classes = batch['gt_classes']
     dontcare = batch['dontcare']
     orgin_im = batch['origin_im']
+    size_index = batch['size_index']
 
     # forward
     im_data = net_utils.np_to_variable(im,
@@ -102,7 +111,7 @@ for step in range(start_epoch * imdb.batch_per_epoch,
         cls_loss /= cnt
         print(('epoch %d[%d/%d], loss: %.3f, bbox_loss: %.3f, iou_loss: %.3f, '
                'cls_loss: %.3f (%.2f s/batch, rest:%s)' %
-               (imdb.epoch, step_cnt, batch_per_epoch, train_loss, bbox_loss,
+               (epoch, step_cnt, batch_per_epoch, train_loss, bbox_loss,
                 iou_loss, cls_loss, duration,
                 str(datetime.timedelta(seconds=int((batch_per_epoch - step_cnt) * duration))))))  # noqa
 
@@ -117,20 +126,18 @@ for step in range(start_epoch * imdb.batch_per_epoch,
         bbox_loss, iou_loss, cls_loss = 0., 0., 0.
         cnt = 0
         t.clear()
-        size_index = randint(0, len(cfg.multi_scale_inp_size) - 1)
-        print("image_size {}".format(cfg.multi_scale_inp_size[size_index]))
 
-    if step > 0 and (step % imdb.batch_per_epoch == 0):
-        if imdb.epoch in cfg.lr_decay_epochs:
-            lr *= cfg.lr_decay
-            optimizer = torch.optim.SGD(net.parameters(), lr=lr,
-                                        momentum=cfg.momentum,
-                                        weight_decay=cfg.weight_decay)
+    # End of epoch loop.
 
-        save_name = os.path.join(cfg.train_output_dir,
-                                 '{}_{}.h5'.format(cfg.exp_name, imdb.epoch))
-        net_utils.save_net(save_name, net)
-        print(('save model: {}'.format(save_name)))
-        step_cnt = 0
+  if epoch in cfg.lr_decay_epochs:
+      lr *= cfg.lr_decay
+      optimizer = torch.optim.SGD(net.parameters(), lr=lr,
+                                  momentum=cfg.momentum,
+                                  weight_decay=cfg.weight_decay)
 
-imdb.close()
+  save_name = os.path.join(cfg.train_output_dir,
+                              '{}_{}.h5'.format(cfg.exp_name, epoch))
+  net_utils.save_net(save_name, net)
+  print(('save model: {}'.format(save_name)))
+  step_cnt = 0
+

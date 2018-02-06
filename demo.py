@@ -1,7 +1,6 @@
 import os
 import cv2
 import numpy as np
-from torch.multiprocessing import Pool
 
 from darknet import Darknet19
 import utils.yolo as yolo_utils
@@ -11,11 +10,10 @@ import cfgs.config as cfg
 
 
 def preprocess(fname):
-    # return fname
     image = cv2.imread(fname)
-    im_data = np.expand_dims(
-        yolo_utils.preprocess_test((image, None, cfg.inp_size))[0], 0)
-    return image, im_data
+    batch = yolo_utils.collate_fn_test([{'image': image}],
+            cfg.multi_scale_inp_size[cfg.demo_index])
+    return batch['origin_im'][0], batch['images']
 
 
 # hyper-parameters
@@ -42,10 +40,10 @@ im_fnames = sorted((fname
                     for fname in os.listdir(im_path)
                     if os.path.splitext(fname)[-1] == '.jpg'))
 im_fnames = (os.path.join(im_path, fname) for fname in im_fnames)
-pool = Pool(processes=1)
 
-for i, (image, im_data) in enumerate(pool.imap(
-        preprocess, im_fnames, chunksize=1)):
+for i, im_fname in enumerate(im_fnames):
+    image, im_data = preprocess(im_fname)
+
     t_total.tic()
     im_data = net_utils.np_to_variable(
         im_data, is_cuda=True, volatile=True).permute(0, 3, 1, 2)
@@ -60,7 +58,8 @@ for i, (image, im_data) in enumerate(pool.imap(
     # print bbox_pred.shape, iou_pred.shape, prob_pred.shape
 
     bboxes, scores, cls_inds = yolo_utils.postprocess(
-        bbox_pred, iou_pred, prob_pred, image.shape, cfg, thresh)
+        bbox_pred, iou_pred, prob_pred, image.shape, cfg, thresh,
+        size_index=cfg.demo_index)
 
     im2show = yolo_utils.draw_detection(image, bboxes, scores, cls_inds, cfg)
 
