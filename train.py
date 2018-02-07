@@ -6,7 +6,7 @@ from functools import partial
 
 from darknet import Darknet19
 
-from datasets.pascal_voc import VOCDataset
+from datasets.factory import define_dataset
 from torch.utils.data import DataLoader
 import utils.yolo as yolo_utils
 import utils.network as net_utils
@@ -24,7 +24,8 @@ logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
 
 
 # data loader
-dataset = VOCDataset(cfg.imdb_train, cfg.DATA_DIR)
+
+dataset = define_dataset('pascal_voc', cfg.imdb_train, cfg.DATA_DIR)
 collate_fn = partial(yolo_utils.collate_fn_train,
     multi_scale_inp_size=cfg.multi_scale_inp_size)
 dataloader = DataLoader(dataset, batch_size=cfg.train_batch_size,

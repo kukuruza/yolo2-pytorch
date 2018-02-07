@@ -10,7 +10,7 @@ from darknet import Darknet19
 import utils.yolo as yolo_utils
 import utils.network as net_utils
 from utils.timer import Timer
-from datasets.pascal_voc import VOCDataset
+from datasets.factory import define_dataset
 from torch.utils.data import DataLoader
 import cfgs.config as cfg
 
@@ -130,7 +130,7 @@ def test_net(net, dataset, dataloader, max_per_image=300, thresh=0.5, vis=False)
 
 if __name__ == '__main__':
     # data loader
-    dataset = VOCDataset(imdb_name, cfg.DATA_DIR)
+    dataset = define_dataset('pascal_voc', imdb_name, cfg.DATA_DIR)
     collate_fn = partial(yolo_utils.collate_fn_test,
         inp_size=cfg.multi_scale_inp_size[args.image_size_index])
     dataloader = DataLoader(dataset, batch_size=cfg.batch_size,
