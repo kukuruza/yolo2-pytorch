@@ -22,6 +22,7 @@ except ImportError:
 logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
 
 parser = argparse.ArgumentParser(description='PyTorch Yolo')
+parser.add_argument('--train_output_dir')
 parser.add_argument('--dataset_type', default='citycam', choices=['pascal_voc', 'citycam'])
 parser.add_argument('--db_path', help='for citycam dataset only')
 args = parser.parse_args()
@@ -47,7 +48,7 @@ dataloader = DataLoader(dataset, batch_size=cfg.train_batch_size,
     shuffle=True, num_workers=2, collate_fn=collate_fn)
 print('load data succ...')
 
-net = Darknet19()
+net = Darknet19(num_classes=dataset.num_classes)
 # net_utils.load_net(cfg.trained_model, net)
 # pretrained_model = os.path.join(cfg.train_output_dir,
 #     'darknet19_voc07trainval_exp1_63.h5')
@@ -150,9 +151,9 @@ for epoch in range(start_epoch, cfg.max_epoch):
                                   momentum=cfg.momentum,
                                   weight_decay=cfg.weight_decay)
 
-  save_name = os.path.join(cfg.train_output_dir,
-                              '{}_{}.h5'.format(cfg.exp_name, epoch))
-  net_utils.save_net(save_name, net)
-  print(('save model: {}'.format(save_name)))
+  train_output_dir = args.train_output_dir if args.train_output_dir is not None else cfg.train_output_dir
+  train_output_path = os.path.join(train_output_dir, 'epoch_%d.h5' % epoch)
+  logging.info('Saving model to %s' % train_output_path)
+  net_utils.save_net(train_output_path, net)
   step_cnt = 0
 

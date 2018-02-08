@@ -132,7 +132,7 @@ def collate_fn_test(batch, inp_size):
     return batch
 
 
-def postprocess(bbox_pred, iou_pred, prob_pred, im_shape, cfg, thresh=0.05,
+def postprocess(bbox_pred, iou_pred, prob_pred, im_shape, num_classes, cfg, thresh=0.05,
                 size_index=0):
     """
     bbox_pred: (bsize, HxW, num_anchors, 4)
@@ -142,7 +142,6 @@ def postprocess(bbox_pred, iou_pred, prob_pred, im_shape, cfg, thresh=0.05,
     """
 
     # num_classes, num_anchors = cfg.num_classes, cfg.num_anchors
-    num_classes = cfg.num_classes
     anchors = cfg.anchors
     W, H = cfg.multi_scale_out_size[size_index]
     assert bbox_pred.shape[0] == 1, 'postprocess only support one image per batch'  # noqa
@@ -242,10 +241,8 @@ def get_bbox_targets(images, gt_boxes, cls_inds, dontcares, cfg):
     return bbox_targets, cls_targets
 
 
-def draw_detection(im, bboxes, scores, cls_inds, cfg, thr=0.3):
+def draw_detection(im, bboxes, scores, cls_inds, colors, labels, thr=0.3):
     # draw image
-    colors = cfg.colors
-    labels = cfg.label_names
 
     imgcv = np.copy(im)
     h, w, _ = imgcv.shape

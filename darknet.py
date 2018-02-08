@@ -37,18 +37,17 @@ def _make_layers(in_channels, net_cfg):
     return nn.Sequential(*layers), in_channels
 
 
-def _process_batch(data, size_index):
+def _process_batch(bbox_pred_np, gt_boxes, gt_classes, dontcares, iou_pred_np,
+                   num_classes, size_index):
     W, H = cfg.multi_scale_out_size[size_index]
     inp_size = cfg.multi_scale_inp_size[size_index]
     out_size = cfg.multi_scale_out_size[size_index]
-
-    bbox_pred_np, gt_boxes, gt_classes, dontcares, iou_pred_np = data
 
     # net output
     hw, num_anchors, _ = bbox_pred_np.shape
 
     # gt
-    _classes = np.zeros([hw, num_anchors, cfg.num_classes], dtype=np.float)
+    _classes = np.zeros([hw, num_anchors, num_classes], dtype=np.float)
     _class_mask = np.zeros([hw, num_anchors, 1], dtype=np.float)
 
     _ious = np.zeros([hw, num_anchors, 1], dtype=np.float)
@@ -138,8 +137,9 @@ def _process_batch(data, size_index):
 
 
 class Darknet19(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes):
         super(Darknet19, self).__init__()
+        self.num_classes = num_classes
 
         net_cfgs = [
             # conv1s
@@ -170,7 +170,7 @@ class Darknet19(nn.Module):
         self.conv4, c4 = _make_layers((c1*(stride*stride) + c3), net_cfgs[7])
 
         # linear
-        out_channels = cfg.num_anchors * (cfg.num_classes + 5)
+        out_channels = cfg.num_anchors * (self.num_classes + 5)
         self.conv5 = net_utils.Conv2d(c4, out_channels, 1, 1, relu=False)
         self.global_average_pool = nn.AvgPool2d((1, 1))
 
@@ -200,8 +200,8 @@ class Darknet19(nn.Module):
         bsize, _, h, w = global_average_pool.size()
         # assert bsize == 1, 'detection only support one image per batch'
         global_average_pool_reshaped = \
-            global_average_pool.permute(0, 2, 3, 1).contiguous().view(bsize,
-                                                                      -1, cfg.num_anchors, cfg.num_classes + 5)  # noqa
+            global_average_pool.permute(0, 2, 3, 1).contiguous().view(
+                bsize, -1, cfg.num_anchors, self.num_classes + 5)  # noqa
 
         # tx, ty, tw, th, to -> sig(tx), sig(ty), exp(tw), exp(th), sig(to)
         xy_pred = F.sigmoid(global_average_pool_reshaped[:, :, :, 0:2])
@@ -257,8 +257,8 @@ class Darknet19(nn.Module):
         bsize = bbox_pred_np.shape[0]
 
         targets = [_process_batch(
-            (bbox_pred_np[b], gt_boxes[b], gt_classes[b], dontcare[b], iou_pred_np[b]),
-             size_index=size_index)
+            bbox_pred_np[b], gt_boxes[b], gt_classes[b], dontcare[b], iou_pred_np[b],
+            num_classes=self.num_classes, size_index=size_index)
             for b in range(bsize)]
 
 

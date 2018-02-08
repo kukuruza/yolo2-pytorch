@@ -50,8 +50,9 @@ def _to_color(indx, base):
     return b * 127, r * 127, g * 127
 
 
-base = int(np.ceil(pow(num_classes, 1. / 3)))
-colors = [_to_color(x, base) for x in range(num_classes)]
+num_classes_for_display = 20
+base = int(np.ceil(pow(num_classes_for_display, 1. / 3)))
+colors = [_to_color(x, base) for x in range(num_classes_for_display)]
 
 
 # detection config

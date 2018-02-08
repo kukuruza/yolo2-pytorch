@@ -21,16 +21,16 @@ parser = argparse.ArgumentParser(description='PyTorch Yolo')
 parser.add_argument('--dataset_type', default='citycam', choices=['pascal_voc', 'citycam'])
 parser.add_argument('--db_path', help='for citycam dataset only')
 parser.add_argument('--image_size_index', type=int, default=0,
-                    metavar='image_size_index',
                     help='setting images size index 0:320, 1:352, 2:384, 3:416, 4:448, 5:480, 6:512, 7:544, 8:576')
+parser.add_argument('--trained_model',
+                    help='overload path to the trained model.')
 args = parser.parse_args()
 
 
 # hyper-parameters
 # ------------
-# trained_model = cfg.trained_model
-trained_model = os.path.join(cfg.train_output_dir,
-                             'darknet19_voc07trainval_exp3_118.h5')
+trained_model = args.trained_model if args.trained_model is not None else \
+    os.path.join(cfg.train_output_dir, 'darknet19_voc07trainval_exp3_118.h5')
 output_dir = cfg.test_output_dir
 
 max_per_image = 300
@@ -71,6 +71,7 @@ def test_net(net, dataset, dataloader, max_per_image=300, thresh=0.5, vis=False)
                                                           iou_pred,
                                                           prob_pred,
                                                           ori_im.shape,
+                                                          num_classes,
                                                           cfg,
                                                           thresh,
                                                           args.image_size_index
@@ -102,7 +103,7 @@ def test_net(net, dataset, dataloader, max_per_image=300, thresh=0.5, vis=False)
                     all_boxes[j][i] = all_boxes[j][i][keep, :]
         nms_time = _t['misc'].toc()
 
-        if i % 20 == 0:
+        if i % 200 == 0:
             print('im_detect: {:d}/{:d} {:.3f}s {:.3f}s'.format(i + 1, num_images, detect_time, nms_time))  # noqa
             _t['im_detect'].clear()
             _t['misc'].clear()
@@ -143,13 +144,14 @@ def define_dataset(dataset_type):
 
 if __name__ == '__main__':
     # data loader
-    dataset = define_dataset('pascal_voc')
+    dataset = define_dataset(args.dataset_type)
     collate_fn = partial(yolo_utils.collate_fn_test,
         inp_size=cfg.multi_scale_inp_size[args.image_size_index])
     dataloader = DataLoader(dataset, batch_size=cfg.batch_size,
         shuffle=False, num_workers=2, drop_last=False, collate_fn=collate_fn)
 
-    net = Darknet19()
+    net = Darknet19(num_classes=dataset.num_classes)
+    logging.info('Loading model from %s' % trained_model)
     net_utils.load_net(trained_model, net)
 
     net.cuda()
