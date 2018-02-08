@@ -30,12 +30,12 @@ args = parser.parse_args()
 def define_dataset(dataset_type):
     if dataset_type == 'pascal_voc':
         from datasets.pascal_voc import VOCDataset
+        logging.info ('Loading pascal_voc dataset')
         return VOCDataset(cfg.imdb_train, cfg.DATA_DIR)
     elif dataset_type == 'citycam':
-        import os, sys
-        sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
-        from db.lib.dbDataset import CityimagesDataset
-        return CityimagesDataset(args.db_path)
+        from datasets.citycams import CityDataset
+        logging.info ('Loading citycams dataset')
+        return CityDataset(args.db_path)
     else:
         raise Exception('Wrong dataset_type.')
 

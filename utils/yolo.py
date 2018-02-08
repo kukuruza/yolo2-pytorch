@@ -68,14 +68,15 @@ def collate_fn_train(batch, multi_scale_inp_size):
 
         # Save a copy as "original_image"
         sample['origin_im'] = np.copy(im)
-        
+
         im, trans_param = imcv2_affine_trans(im)
         scale, offs, flip = trans_param
         sample['gt_boxes'] = _offset_boxes(sample['gt_boxes'], im.shape, scale, offs, flip)
 
         w, h = inp_size
-        sample['gt_boxes'][:, 0::2] *= float(w) / im.shape[1]
-        sample['gt_boxes'][:, 1::2] *= float(h) / im.shape[0]
+        if len(sample['gt_boxes']) > 0:
+            sample['gt_boxes'][:, 0::2] *= float(w) / im.shape[1]
+            sample['gt_boxes'][:, 1::2] *= float(h) / im.shape[0]
         im = cv2.resize(im, (w, h))
         im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
         im = imcv2_recolor(im)
