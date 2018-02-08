@@ -178,7 +178,6 @@ class Darknet19(nn.Module):
         self.bbox_loss = None
         self.iou_loss = None
         self.cls_loss = None
-        self.pool = Pool(processes=10)
 
     @property
     def loss(self):
@@ -257,10 +256,11 @@ class Darknet19(nn.Module):
 
         bsize = bbox_pred_np.shape[0]
 
-        targets = self.pool.map(partial(_process_batch, size_index=size_index),
-                                ((bbox_pred_np[b], gt_boxes[b],
-                                  gt_classes[b], dontcare[b], iou_pred_np[b])
-                                 for b in range(bsize)))
+        targets = [_process_batch(
+            (bbox_pred_np[b], gt_boxes[b], gt_classes[b], dontcare[b], iou_pred_np[b]),
+             size_index=size_index)
+            for b in range(bsize)]
+
 
         _boxes = np.stack(tuple((row[0] for row in targets)))
         _ious = np.stack(tuple((row[1] for row in targets)))
@@ -279,6 +279,8 @@ class Darknet19(nn.Module):
         params = np.load(fname)
         own_dict = self.state_dict()
         keys = list(own_dict.keys())
+
+        return
 
         for i, start in enumerate(range(0, len(keys), 5)):
             if num_conv is not None and i >= num_conv:
