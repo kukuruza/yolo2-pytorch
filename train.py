@@ -1,6 +1,6 @@
 import os
 import torch
-import datetime
+from time import time
 import logging
 import argparse
 from functools import partial
@@ -19,13 +19,16 @@ try:
 except ImportError:
     CrayonClient = None
 
-logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
-
 parser = argparse.ArgumentParser(description='PyTorch Yolo')
 parser.add_argument('--train_output_dir')
 parser.add_argument('--dataset_type', default='citycam', choices=['pascal_voc', 'citycam'])
 parser.add_argument('--db_path', help='for citycam dataset only')
+parser.add_argument('--logging', type=int, default=20, choices=[10,20,30,40])
+parser.add_argument('--epochs_per_saved_model', type=int, default=10)
+parser.add_argument('--use_maps', action='store_true')
 args = parser.parse_args()
+
+logging.basicConfig(level=args.logging, format='%(levelname)s: %(message)s')
 
 
 def define_dataset(dataset_type):
@@ -41,14 +44,14 @@ def define_dataset(dataset_type):
         raise Exception('Wrong dataset_type.')
 
 # data loader
-dataset = define_dataset(args.dataset_type)
+dataset = define_dataset(args.dataset_type, (5 if args.use_maps else 3))
 collate_fn = partial(yolo_utils.collate_fn_train,
     multi_scale_inp_size=cfg.multi_scale_inp_size)
 dataloader = DataLoader(dataset, batch_size=cfg.train_batch_size,
     shuffle=True, num_workers=2, collate_fn=collate_fn)
 print('load data succ...')
 
-net = Darknet19(num_classes=dataset.num_classes)
+net = Darknet19(num_classes=dataset.num_classes, input_nc=(5 if args.use_maps else 3))
 # net_utils.load_net(cfg.trained_model, net)
 # pretrained_model = os.path.join(cfg.train_output_dir,
 #     'darknet19_voc07trainval_exp1_63.h5')
@@ -84,17 +87,10 @@ if use_tensorboard:
         exp = cc.open_experiment(cfg.exp_name)
 
 batch_per_epoch = len(dataset) // cfg.train_batch_size
-train_loss = 0
-bbox_loss, iou_loss, cls_loss = 0., 0., 0.
-cnt = 0
-t = Timer()
-step_cnt = 0
-step = 0  # Step is NOT reset at each epoch.
+train_loss, bbox_loss, iou_loss, cls_loss = 0., 0., 0., 0.
 for epoch in range(start_epoch, cfg.max_epoch):
-  for batch in dataloader:
-    step += 1
-
-    t.tic()
+  for step, batch in enumerate(dataloader):
+    start = time()
 
     im = batch['images']
     gt_boxes = batch['gt_boxes']
@@ -103,9 +99,8 @@ for epoch in range(start_epoch, cfg.max_epoch):
     orgin_im = batch['origin_im']
     size_index = batch['size_index']
 
-    im_data = net_utils.np_to_variable(im,
-                                       is_cuda=True,
-                                       volatile=False).permute(0, 3, 1, 2)
+    im_data = net_utils.np_to_variable(
+        im, is_cuda=True, volatile=False).permute(0, 3, 1, 2)
     net(im_data, gt_boxes, gt_classes, dontcare, size_index)
 
     # backward
@@ -117,31 +112,27 @@ for epoch in range(start_epoch, cfg.max_epoch):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    cnt += 1
-    step_cnt += 1
-    duration = t.toc()
+
+    duration = time() - start
     if step % cfg.disp_interval == 0:
-        train_loss /= cnt
-        bbox_loss /= cnt
-        iou_loss /= cnt
-        cls_loss /= cnt
-        print(('epoch %d[%d/%d], loss: %.3f, bbox_loss: %.3f, iou_loss: %.3f, '
-               'cls_loss: %.3f (%.2f s/batch, rest:%s)' %
-               (epoch, step_cnt, batch_per_epoch, train_loss, bbox_loss,
-                iou_loss, cls_loss, duration,
-                str(datetime.timedelta(seconds=int((batch_per_epoch - step_cnt) * duration))))))  # noqa
+        train_loss /= cfg.disp_interval
+        bbox_loss /= cfg.disp_interval
+        iou_loss /= cfg.disp_interval
+        cls_loss /= cfg.disp_interval
+        print('epoch %d[%d/%d], loss: %.3f, bbox_loss: %.3f, iou_loss: %.3f, '
+              'cls_loss: %.3f (%.2f s/batch)' %
+               (epoch, step, batch_per_epoch, train_loss, bbox_loss,
+                iou_loss, cls_loss, duration))
 
-        if use_tensorboard and step % cfg.log_interval == 0:
-            exp.add_scalar_value('loss_train', train_loss, step=step)
-            exp.add_scalar_value('loss_bbox', bbox_loss, step=step)
-            exp.add_scalar_value('loss_iou', iou_loss, step=step)
-            exp.add_scalar_value('loss_cls', cls_loss, step=step)
-            exp.add_scalar_value('learning_rate', lr, step=step)
+        if use_tensorboard and (step % cfg.log_interval == 0):
+            absstep = step + epoch * len(dataset)
+            exp.add_scalar_value('loss_train', train_loss, step=absstep)
+            exp.add_scalar_value('loss_bbox', bbox_loss, step=absstep)
+            exp.add_scalar_value('loss_iou', iou_loss, step=absstep)
+            exp.add_scalar_value('loss_cls', cls_loss, step=absstep)
+            exp.add_scalar_value('learning_rate', lr, step=absstep)
 
-        train_loss = 0
-        bbox_loss, iou_loss, cls_loss = 0., 0., 0.
-        cnt = 0
-        t.clear()
+        train_loss, bbox_loss, iou_loss, cls_loss = 0., 0., 0., 0.
 
     # End of epoch loop.
 
@@ -151,9 +142,9 @@ for epoch in range(start_epoch, cfg.max_epoch):
                                   momentum=cfg.momentum,
                                   weight_decay=cfg.weight_decay)
 
-  train_output_dir = args.train_output_dir if args.train_output_dir is not None else cfg.train_output_dir
-  train_output_path = os.path.join(train_output_dir, 'epoch_%d.h5' % epoch)
-  logging.info('Saving model to %s' % train_output_path)
-  net_utils.save_net(train_output_path, net)
-  step_cnt = 0
+  if epoch % args.epochs_per_saved_model == 0:
+    train_output_dir = args.train_output_dir if args.train_output_dir is not None else cfg.train_output_dir
+    train_output_path = os.path.join(train_output_dir, 'epoch_%d.h5' % epoch)
+    logging.info('Saving model to %s' % train_output_path)
+    net_utils.save_net(train_output_path, net)
 

@@ -51,6 +51,24 @@ def _offset_boxes(boxes, im_shape, scale, offs, flip):
     return boxes
 
 
+def add_maps_to_image(sample, w, h):
+    if 'sizemap' in sample:
+      assert len(sample['sizemap'].shape) == 2, sample['sizemap'].shape
+      sizemap = (sample['sizemap']).astype(float)  # Size map is already in 0-255.
+      sizemap = cv2.resize(sizemap, (w, h))
+      sample['sizemap'] = sizemap.astype(float) / 255.  # Normalize sizemap to 0-1.
+      sample['image'] = np.concatenate((sample['image'], sample['sizemap'][:,:,np.newaxis]), axis=2)
+
+    if 'pitchmap' in sample:
+      assert len(sample['pitchmap'].shape) == 2, sample['pitchmap'].shape
+      pitchmap = (sample['pitchmap'] * 255.).astype(float)
+      pitchmap = cv2.resize(pitchmap, (w, h))
+      sample['pitchmap'] = pitchmap.astype(float) / 255.
+      sample['image'] = np.concatenate((sample['image'], sample['pitchmap'][:,:,np.newaxis]), axis=2)
+
+    return sample
+
+
 def collate_fn_train(batch, multi_scale_inp_size):
     '''
     Collects a list of (image, gt boxes, etc) from a dataset into a batch.
@@ -83,11 +101,9 @@ def collate_fn_train(batch, multi_scale_inp_size):
         sample['image'] = im
         # im /= 255.  # Done in im_transform.imcv2_recolor.
 
-        # im = imcv2_recolor(im)
-        # h, w = inp_size
-        # im = cv2.resize(im, (w, h))
-        # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-        # im /= 255
+        # In case sample has size and pitch maps.
+        sample = add_maps_to_image(sample, w, h)
+        logging.debug('collate_fn_train: image has %d channels.' % sample['image'].shape[2])
 
     # List of dicts to dict of lists.
     batch = dict(zip(batch[0],zip(*[d.values() for d in batch])))
@@ -121,6 +137,10 @@ def collate_fn_test(batch, inp_size):
         im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
         im = im / 255.
         sample['image'] = im
+
+        # In case sample has size and pitch maps.
+        sample = add_maps_to_image(sample, w, h)
+        logging.debug('collate_fn_test: image has %d channels.' % sample['image'].shape[2])
 
     # List of dicts to dict of lists.
     batch = dict(zip(batch[0],zip(*[d.values() for d in batch])))

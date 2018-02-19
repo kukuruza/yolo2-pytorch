@@ -59,8 +59,6 @@ colors = [_to_color(x, base) for x in range(num_classes_for_display)]
 ############################
 thresh = 0.3
 
-batch_per_epoch = 1000
-
 # dir config
 ############################
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))

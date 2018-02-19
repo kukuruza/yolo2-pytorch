@@ -137,7 +137,7 @@ def _process_batch(bbox_pred_np, gt_boxes, gt_classes, dontcares, iou_pred_np,
 
 
 class Darknet19(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, input_nc=3):
         super(Darknet19, self).__init__()
         self.num_classes = num_classes
 
@@ -158,7 +158,7 @@ class Darknet19(nn.Module):
         ]
 
         # darknet
-        self.conv1s, c1 = _make_layers(3, net_cfgs[0:5])
+        self.conv1s, c1 = _make_layers(input_nc, net_cfgs[0:5])
         self.conv2, c2 = _make_layers(c1, net_cfgs[5])
         # ---
         self.conv3, c3 = _make_layers(c2, net_cfgs[6])

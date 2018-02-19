@@ -6,6 +6,7 @@ from time import time
 from functools import partial
 from pprint import pprint
 from scipy.misc import imsave
+from itertools import izip
 
 from darknet import Darknet19
 import utils.yolo as yolo_utils
@@ -30,7 +31,12 @@ class Detector:
     
     
   def __call__(self, batch):
-    ''' Detect in a batch.
+    '''
+    Args:
+      batch:  A pytorch batch as a dict.
+              It should be obtained from utils.yolo.collate_fn_test / *_train.
+    Returns:
+      a list of tuples ([x1, y1, x2, y2], score, class_id)
     '''
     
     t_all = time()
@@ -98,8 +104,8 @@ if __name__ == '__main__':
     parser.add_argument('--image_size_index', type=int, default=0,
                         help='setting images size index 0:320, 1:352, 2:384, 3:416, 4:448, 5:480, 6:512, 7:544, 8:576')
     parser.add_argument('--max_per_image', type=int, default=300)
-    parser.add_argument('--thresh', type=float, default=0.01)
-    parser.add_argument('--vis', action='store_true')
+    parser.add_argument('--thresh', type=float, default=0.5)
+    parser.add_argument('--num_samples', type=int, default=1)
     args = parser.parse_args()
 
     # data loader
@@ -113,7 +119,8 @@ if __name__ == '__main__':
                         thresh=args.thresh, image_size_index=args.image_size_index,
                         num_classes=dataset.num_classes)
 
-    for batch in dataloader:
+    for i, batch in izip(range(args.num_samples), dataloader):
+      print i
       results = detector(batch)
       pprint(results)
 
@@ -123,9 +130,7 @@ if __name__ == '__main__':
         im2show = yolo_utils.draw_detection(
             batch['origin_im'][0], bboxes, scores, cls_inds,
             cfg.colors, dataset.classes, thr=0.5)
-        print im2show.shape
-        logging.info('Saving the visualzation to %s' % args.vis_path)
-        imsave(args.vis_path, im2show)
-
-      break
+        root, ext = os.path.splitext(args.vis_path)
+        vis_path = '%s-%d%s' % (root, i, ext)
+        logging.info('Saving the visualization to %s' % vis_path)
 
